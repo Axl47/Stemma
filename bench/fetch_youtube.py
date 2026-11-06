@@ -1,6 +1,7 @@
 """Download full-track audio from YouTube Music for a track list, slowly, into a directory.
 
 Usage: python bench/fetch_youtube.py <tracks.jsonl> <out_dir> [--sleep MIN MAX] [--limit N]
+                                    [--upload RSYNC_DEST [--upload-every N]]
 
 Each track is searched on YouTube Music (songs first, i.e. official "Topic" audio; see `find`)
 and a result is accepted only if duration (±3 s), artist and title match, using the Deezer
@@ -8,11 +9,17 @@ matcher's rules. The best audio stream is saved untouched as `<cache_key>.<ext>`
 ~3-5 MB per track). Progress goes to `<out_dir>/manifest.jsonl`, one line per finished track,
 so the run resumes where it stopped. A bot-check answer from YouTube stops the run instead of
 burning through the list.
+
+With `--upload` (e.g. `audio-box:tracks/`), out_dir is only an outbox: every N tracks, and at the
+end, finished audio files are rsynced to the destination and deleted locally once they've
+arrived. The manifest stays local (it is what resume reads) and a copy goes along with the audio.
+A failed upload is logged and retried at the next batch, so an unreachable box only grows the outbox.
 """
 
 import argparse
 import json
 import random
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,6 +32,24 @@ from audio_embed_engine.deezer import DURATION_TOLERANCE_S, _clean_title, _norm,
 from audio_embed_engine.types import Track, read_tracks
 
 BOT_CHECK = ("confirm you're not a bot", "sign in to confirm")
+PARTIAL = (".part", ".ytdl")  # yt-dlp leftovers from an interrupted download
+
+
+def upload(out_dir: Path, dest: str) -> None:
+    """Move finished audio files to `dest` with rsync, then copy the manifest next to them."""
+    files = sorted(
+        p.name for p in out_dir.iterdir() if p.is_file() and p.name != "manifest.jsonl" and p.suffix not in PARTIAL
+    )
+    try:
+        if files:
+            subprocess.run(
+                ["rsync", "-t", "--remove-source-files", *files, dest], cwd=out_dir, check=True, timeout=1800
+            )
+        if (out_dir / "manifest.jsonl").exists():
+            subprocess.run(["rsync", "-t", "manifest.jsonl", dest], cwd=out_dir, check=True, timeout=300)
+        print(f"uploaded {len(files)} files to {dest}", file=sys.stderr)
+    except (subprocess.SubprocessError, OSError) as e:
+        print(f"upload failed, will retry next batch: {e}", file=sys.stderr)
 
 
 def match(track: Track, song: dict[str, Any]) -> bool:
@@ -60,6 +85,8 @@ def main() -> None:
     ap.add_argument("out_dir", type=Path)
     ap.add_argument("--sleep", nargs=2, type=float, default=(3.0, 8.0), metavar=("MIN", "MAX"))
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--upload", metavar="RSYNC_DEST")
+    ap.add_argument("--upload-every", type=int, default=25)
     args = ap.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -70,6 +97,8 @@ def main() -> None:
     print(f"{len(done)} already done, {len(todo)} to go", file=sys.stderr)
 
     start = time.perf_counter()
+    if args.upload:
+        upload(args.out_dir, args.upload)  # anything a previous run left behind
     with manifest.open("a") as log:
         for i, track in enumerate(todo, 1):
             t0 = time.perf_counter()
@@ -113,7 +142,11 @@ def main() -> None:
                 f"[{i}/{len(todo)}] {row['status']:9} {row['seconds']:5.1f}s  {track.artists[:1]} {track.title}",
                 file=sys.stderr,
             )
+            if args.upload and i % args.upload_every == 0:
+                upload(args.out_dir, args.upload)
             time.sleep(random.uniform(*args.sleep))
+    if args.upload:
+        upload(args.out_dir, args.upload)
     took = time.perf_counter() - start
     print(f"{len(todo)} tracks attempted in {took / 60:.1f} min", file=sys.stderr)
 
