@@ -95,7 +95,8 @@ def main() -> None:
     manifest = args.out_dir / "manifest.jsonl"
     rows = [json.loads(l) for l in manifest.open()] if manifest.exists() else []
     done = {r["key"] for r in rows if r["status"] in ("ok", "not_found")}
-    todo = [t for t in dict.fromkeys(read_tracks(args.tracks)) if t.cache_key not in done][: args.limit]
+    unique = {t.cache_key: t for t in read_tracks(args.tracks)}  # releases sharing an ISRC are one recording
+    todo = [t for key, t in unique.items() if key not in done][: args.limit]
     yt = YTMusic()
     print(f"{len(done)} already done, {len(todo)} to go", file=sys.stderr)
 
