@@ -33,6 +33,7 @@ class RateLimiter:
         self.window = window
         self._calls: deque[float] = deque()
         self._lock = threading.Lock()
+        self.total = 0  # acquisitions so far
 
     def acquire(self) -> None:
         while True:
@@ -42,6 +43,7 @@ class RateLimiter:
                     self._calls.popleft()
                 if len(self._calls) < self.max_calls:
                     self._calls.append(now)
+                    self.total += 1
                     return
                 wait = self.window - (now - self._calls[0])
             time.sleep(wait)
@@ -77,13 +79,15 @@ class Deezer:
         self.client = client or httpx.Client(timeout=20, follow_redirects=True)
         self.limiter = RateLimiter(max_calls, window)
         self.retries = retries
-        self.api_calls = 0
+
+    @property
+    def api_calls(self) -> int:
+        return self.limiter.total
 
     def _api(self, path: str, params: dict[str, str | int] | None = None) -> Json | None:
         """GET an API path. Returns None for Deezer's 'no data' error, raises DeezerError when retries run out."""
         for attempt in range(self.retries + 1):
             self.limiter.acquire()
-            self.api_calls += 1
             try:
                 r = self.client.get(API + path, params=params)
                 if r.status_code >= 500 or r.status_code == 429:
