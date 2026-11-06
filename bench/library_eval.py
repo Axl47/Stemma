@@ -2,7 +2,7 @@
 
 Usage: python bench/library_eval.py <library.json> <tracks.jsonl> [--db PATH]
 
-Every track that sits in at least one playlist becomes a leave-one-out query. Playlists are
+Catch-all playlists holding over half the library are ignored. Every track that sits in at least one playlist becomes a leave-one-out query. Playlists are
 scored only from members that share NO artist (by Spotify artist id) with the query, which
 simulates a song by a never-sorted artist. Reports recall@3 (share of the track's playlists
 in the top 3), hit@3, and a popularity baseline (always suggest the 3 biggest playlists).
@@ -34,9 +34,12 @@ def main() -> None:
     artists = [frozenset(a["id"] for a in lib["tracks"][k]["artists"]) for k in keys]
 
     playlists: dict[str, list[int]] = {}
+    skipped = []
     for p in lib["playlists"]:
         members = sorted({index[t] for t in p["trackIds"] if t in index})
-        if members:
+        if len(members) > len(keys) / 2:
+            skipped.append(p["name"])  # catch-all ("Everything"): always correct, says nothing
+        elif members:
             playlists[p["name"]] = members
     names = list(playlists)
     member_of: dict[int, set[int]] = defaultdict(set)
@@ -78,7 +81,8 @@ def main() -> None:
 
     print(
         json.dumps(
-            {"queries": len(stats[f"centroid_recall@{k}"]), "embedded_tracks": len(keys), "playlists": len(names)}
+            {"queries": len(stats[f"centroid_recall@{k}"]), "embedded_tracks": len(keys), "playlists": len(names),
+             "skipped_catch_all": skipped}
             | {n: round(float(np.mean(v)), 3) for n, v in stats.items()},
             indent=1,
         )

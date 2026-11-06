@@ -1,0 +1,195 @@
+# Benchmark report (2026-11-06, MacBook Pro M1 Pro)
+
+## Summary
+
+| | |
+| --- | --- |
+| Model | **Essentia Discogs-EffNet** (`discogs-effnet-bsdynamic-1.onnx`), mean of 1280-d patch embeddings over non-overlapping ~2 s patches, CPU onnxruntime |
+| Cache id | `discogs-effnet-1/mean-hop128/v1` |
+| Bulk throughput | **~510 tracks/min** end to end (full library: 5,875 unique tracks in ~12 min), bound by Deezer's API quota |
+| Inference alone | 37–41 ms/track ≈ 1,500 tracks/min, ~3× faster than the quota lets us download |
+| Re-run, all cached | **0.22 s** for 6,233 lines; 0.25 s for the 150-track sample |
+| 400 tracks, 5 new | **1.4 s** total (5 API calls, 0.22 s inference) |
+| Deezer hit rate | **98.0%** on the 150-track sample, **96.9%** on the whole library (5,690 / 5,875) |
+| Same-playlist vs other pairs | mean cosine 0.58 vs 0.44 with same-artist pairs excluded; pair AUC **0.77** (random 0.50) |
+| Never-sorted-artist simulation | **recall@3 0.49** on the full library (popularity baseline 0.21, random 0.05) |
+
+## Model choice
+
+The candidates were scored on three things:
+
+- **Speed** on the M1 Pro.
+- **Quality** on two label sets:
+  - the sorter's 150-track library sample with real playlist memberships, with every
+    same-artist pair excluded;
+  - a hand-built 53-track fixture: 9 styles × 3 artists × 2 tracks
+    (`bench/tracks.jsonl`, built by `bench/build_fixture.py`).
+- **Setup pain.**
+
+All models received the same decoded Deezer previews. Metric definitions are in
+`bench/metrics.py`:
+
+- **Pair AUC (no shared artist):** the probability that a random same-playlist pair is more
+  similar than a random different-playlist pair, after dropping every pair that shares an
+  artist. This is the most stable number here, since it is computed over ~10k pairs.
+- **LOO recall@3:** leave-one-out. Playlists are ranked for each track using only members
+  that share no artist with it. The centroid scorer uses cosine to the mean member; the top-3
+  scorer uses the mean of the 3 most similar members. With only 123 queries, differences
+  under ~0.05 are noise (standard error ≈ 0.04).
+- **Fixture:** a 5-NN style vote and same-style pair AUC, with same-artist neighbours excluded.
+
+Results from `bench/results.json` (`uv run python bench/table.py`):
+
+| model | dim | infer ms/track | pair AUC (no shared artist) | LOO recall@3 centroid | LOO recall@3 top-3 | fixture style 5-NN | fixture style AUC |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **effnet-hop128** (chosen) | 1280 | 41 | **0.769** | 0.264 | **0.310** | 0.74 | **0.963** |
+| effnet (hop 62, Essentia default) | 1280 | 80 | 0.769 | 0.249 | 0.278 | 0.74 | 0.963 |
+| effnet-coreml | 1280 | 346 | 0.768 | 0.257 | 0.278 | 0.74 | 0.962 |
+| discogs-multi | 1280 | 77 | 0.757 | 0.256 | 0.278 | 0.74 | 0.923 |
+| effnet-styles400 (400 style probabilities as the vector) | 400 | 79 | 0.755 | 0.256 | 0.265 | 0.75 | 0.919 |
+| discogs-artist | 512 | 77 | 0.743 | 0.198 | 0.267 | 0.62 | 0.886 |
+| discogs-release | 512 | 78 | 0.729 | 0.240 | 0.275 | 0.62 | 0.893 |
+| clap-htsat-unfused | 512 | 82 | 0.679 | 0.224 | 0.293 | 0.57 | 0.882 |
+| discogs-label | 512 | 77 | 0.669 | 0.155 | 0.245 | 0.66 | 0.878 |
+| musicnn | 200 | 298 | 0.657 | 0.189 | 0.259 | 0.68 | 0.945 |
+| discogs-track | 512 | 77 | 0.651 | 0.179 | 0.231 | 0.60 | 0.874 |
+| mert (v1-95M, mean over layers and time) | 768 | 405 | 0.607 | 0.198 | 0.251 | 0.38 | 0.737 |
+| clap-music (broken, see below) | 512 | 115 | 0.602 | 0.113 | 0.169 | 0.17 | 0.627 |
+| random | 256 | 0 | 0.499 | 0.004 | 0.065 | 0.06 | 0.556 |
+
+Why Discogs-EffNet:
+
+- **Quality.** It is best or tied-best on every stable metric. Its training target, 400
+  Discogs styles, is close to how people group music into playlists. The Discogs contrastive
+  variants (artist, label, release, track) were trained to cluster by exactly those IDs, and
+  they generalise *worse* to unseen artists, which is the case that matters here.
+- **Speed.** Overlapping patches (Essentia's default hop of 62 frames) double the cost and
+  change nothing measurable, so the engine uses hop 128. CoreML is 4× slower than plain CPU
+  for this graph, presumably because it falls back for unsupported ops.
+- **Setup.** One 18 MB ONNX file plus onnxruntime, which has Apple Silicon wheels. The
+  `essentia-tensorflow` Linux-only problem doesn't apply: Essentia ships ONNX exports, and the
+  mel front end is reimplemented in numpy. It matches Essentia within 1e-3; see
+  `tests/test_audio.py`, where Essentia is only a dev dependency. MERT and CLAP need torch,
+  transformers and ~1 GB of weights, and run 2–10× slower here.
+
+Caveats on the losing models. They were run reasonably, but not tuned.
+
+- **MERT** used plain mean-pooling with no probe. Its remote code also ignores
+  `output_hidden_states` under transformers 5.22, so layers were captured with forward hooks.
+- **`laion/larger_clap_music`** produces collapsed embeddings under transformers 5.22. Mean
+  pairwise cosine is 0.94, and zero-shot labels every track "metal". The general
+  `clap-htsat-unfused` checkpoint behaves normally and is the fair CLAP number.
+
+**GPU (Gaia, RTX 4060): not run, on purpose.** Inference is ~3× faster than the Deezer quota
+lets tracks arrive, so a GPU can't shorten a run. It would only matter for a much heavier
+model, and none of the heavier candidates scored better.
+
+## Throughput (full library, default cache)
+
+The first bulk run processed 5,097 tracks in 607 s wall time, about 504 tracks/min, then hit
+a bug: a ~1 s preview crashed batch inference. Batches are committed as they finish, so
+nothing was lost. After the fix (commit `3d500e0`), the resume processed exactly the
+remaining 778 tracks:
+
+```
+{"unique_tracks": 5875, "cached": 5097, "processed": {"ok": 773, "decode_error": 1, "no_preview": 3, "not_found": 1},
+ "api_calls": 799, "inference_s": 28.43, "wall_s": 89.04}            -> 524 tracks/min
+```
+
+How the time splits:
+
+- **Download side.** Each track costs ~1.05 Deezer API calls (the search fallback is rare).
+  The limiter allows 45 per 5 s, so ~515 tracks/min is the ceiling, and this is the
+  bottleneck.
+- **Inference side.** 37 ms/track inside the pipeline (28.4 s for 773 tracks), plus ~28
+  ms/track of MP3 decode and resampling on the fetch threads. Both overlap with downloading.
+- **Estimate.** 1,500 new tracks ≈ 3 minutes. The model weights (21 MB) download once on
+  first use.
+
+Things measured along the way:
+
+- **Deezer API quota.** About 50 calls per 5 s. Going over returns HTTP 200 with
+  `{"error":{"code":4,"message":"Quota limit exceeded"}}`, not a 429, and the quota recovers
+  ~5 s after the burst. The limiter keeps headroom at 45 per 5 s and backs off a full window
+  on code 4. The bulk run hit no quota errors.
+- **Preview CDN.** `cdnt-preview.dzcdn.net` sits outside that quota, but answered 429 to
+  21 of ~5,000 downloads during the sustained run. Downloads now pause globally on a 429
+  (honouring `Retry-After`, else 2–32 s exponential). A `--retry-failed` pass recovered all 21.
+
+Re-run timings (`/usr/bin/time -p uv run audio-embed embed …`):
+
+| run | wall |
+| --- | --- |
+| 6,233-line library, all cached | 0.22 s (3 runs: 0.22 / 0.22 / 0.22) |
+| 150-track sample, fresh cache | 17.6 s |
+| 150-track sample, second run | 0.25 s |
+| 400 lines (394 unique ISRCs), 5 new | 1.39 s, of which 0.22 s inference, 5 API calls |
+
+## Deezer hit rate
+
+| set | ok | no_preview | not_found | decode_error |
+| --- | ---: | ---: | ---: | ---: |
+| 150-track sample | 147 (98.0%) | 2 | 1 | 0 |
+| full library, 5,875 unique | 5,690 (96.9%) | 107 | 76 | 2 |
+
+The search fallback (artist + title, duration ±3 s, artist-name check) runs rarely: 156 API
+calls for the 150 sample tracks, and ~1.05 calls per track across the library. I did not
+count how many tracks it rescued, as opposed to confirming a miss. One library entry is a Spotify placeholder with an empty
+title, artists and duration, and it is correctly reported as `not_found`.
+
+## Distance check on real playlists
+
+On the 150-track sample (147 embedded), with same-artist pairs excluded:
+
+| pairs | mean cosine | n |
+| --- | ---: | ---: |
+| share a playlist | **0.581** | 576 |
+| don't share a playlist | 0.438 | 9,994 |
+
+The pair AUC is 0.769. Including same-artist pairs moves the mean for pairs sharing a
+playlist to 0.606, so the engine isn't leaning on "same artist" much.
+
+### Full library: "artist I've never sorted"
+
+`bench/library_eval.py` uses every one of the 4,617 tracks that sit in a playlist as a
+leave-one-out query. Each playlist is scored only from members sharing **no artist** (by
+Spotify artist id) with the query, which simulates a song by an artist you've never sorted.
+The catch-all "Everything" playlist (5,720 tracks) is ignored, because it is trivially
+always correct.
+
+| scorer | recall@3 | hit@3 |
+| --- | ---: | ---: |
+| mean of 5 most similar members (kNN) | **0.489** | 0.591 |
+| cosine to playlist centroid | 0.406 | 0.488 |
+| always suggest the 3 biggest playlists | 0.212 | n/a |
+| random | 0.046 | n/a |
+
+*recall@3* is the share of a track's playlists that appear in the top 3. *hit@3* is whether
+at least one does.
+
+Compare this with the sorter's 13% recall@3 for unseen artists from free signals. The
+embedding signal alone covers a large part of that gap. The two numbers aren't directly
+comparable, though:
+
+- The sorter's 13% was measured on genuinely unsorted songs. This is a leave-one-out
+  simulation over already-sorted songs.
+- The sorter's recall@3 definition may differ.
+
+The kNN scorer favours big playlists somewhat, since more members means a higher chance of a
+close neighbour. The popularity row shows that this bias alone is worth 0.21, and the
+embeddings more than double it. The suggested scorer for the sorter is kNN over playlist
+members, after excluding the catch-all playlist.
+
+## Not verified
+
+- No GPU benchmark (Gaia), for the reason given above.
+- Tags (styles and moods) were checked by eye only. On the fixture they look right:
+  - The Midnight → Synth-pop/Synthwave
+  - Slipknot → Heavy/Death Metal
+  - Nujabes → Instrumental/Jazzy Hip-Hop
+  - Daddy Yankee → Reggaeton
+  - Yiruma → Neo-Classical
+  - Chris Stapleton → Blues Rock (no country in the top 3)
+
+  They are display extras and were not evaluated.
+- Long-run CDN behaviour beyond one ~12-minute bulk run.
