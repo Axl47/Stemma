@@ -7,7 +7,8 @@ Each track is searched on YouTube Music (songs first, i.e. official "Topic" audi
 and a result is accepted only if duration (±3 s), artist and title match, using the Deezer
 matcher's rules. The best audio stream is saved untouched as `<cache_key>.<ext>` (Opus/WebM or AAC/M4A,
 ~3-5 MB per track). Progress goes to `<out_dir>/manifest.jsonl`, one line per finished track,
-so the run resumes where it stopped. A bot-check answer from YouTube stops the run instead of
+so the run resumes where it stopped; `error` rows are retried on resume. A bot-check answer, or
+MAX_CONSECUTIVE_ERRORS failures in a row (e.g. the network dropped), stops the run instead of
 burning through the list.
 
 With `--upload` (e.g. `audio-box:tracks/`), out_dir is only an outbox: every N tracks, and at the
@@ -32,6 +33,7 @@ from audio_embed_engine.deezer import DURATION_TOLERANCE_S, _clean_title, _norm,
 from audio_embed_engine.types import Track, read_tracks
 
 BOT_CHECK = ("confirm you're not a bot", "sign in to confirm")
+MAX_CONSECUTIVE_ERRORS = 5
 PARTIAL = (".part", ".ytdl")  # yt-dlp leftovers from an interrupted download
 
 
@@ -91,16 +93,19 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     manifest = args.out_dir / "manifest.jsonl"
-    done = {json.loads(l)["key"] for l in manifest.open()} if manifest.exists() else set()
+    rows = [json.loads(l) for l in manifest.open()] if manifest.exists() else []
+    done = {r["key"] for r in rows if r["status"] in ("ok", "not_found")}
     todo = [t for t in dict.fromkeys(read_tracks(args.tracks)) if t.cache_key not in done][: args.limit]
     yt = YTMusic()
     print(f"{len(done)} already done, {len(todo)} to go", file=sys.stderr)
 
     start = time.perf_counter()
+    errors_in_a_row = attempted = 0
     if args.upload:
         upload(args.out_dir, args.upload)  # anything a previous run left behind
     with manifest.open("a") as log:
         for i, track in enumerate(todo, 1):
+            attempted = i
             t0 = time.perf_counter()
             row: dict[str, Any] = {"key": track.cache_key, "artists": track.artists, "title": track.title}
             try:
@@ -135,6 +140,7 @@ def main() -> None:
                     print(f"bot check after {i - 1} tracks, stopping: {msg}", file=sys.stderr)
                     break
                 row |= {"status": "error", "error": msg[:300]}
+            errors_in_a_row = errors_in_a_row + 1 if row["status"] == "error" else 0
             row["seconds"] = round(time.perf_counter() - t0, 2)
             log.write(json.dumps(row) + "\n")
             log.flush()
@@ -142,13 +148,16 @@ def main() -> None:
                 f"[{i}/{len(todo)}] {row['status']:9} {row['seconds']:5.1f}s  {track.artists[:1]} {track.title}",
                 file=sys.stderr,
             )
+            if errors_in_a_row >= MAX_CONSECUTIVE_ERRORS:
+                print(f"{errors_in_a_row} errors in a row (network down?), stopping", file=sys.stderr)
+                break
             if args.upload and i % args.upload_every == 0:
                 upload(args.out_dir, args.upload)
             time.sleep(random.uniform(*args.sleep))
     if args.upload:
         upload(args.out_dir, args.upload)
     took = time.perf_counter() - start
-    print(f"{len(todo)} tracks attempted in {took / 60:.1f} min", file=sys.stderr)
+    print(f"{attempted} of {len(todo)} tracks attempted in {took / 60:.1f} min", file=sys.stderr)
 
 
 if __name__ == "__main__":
