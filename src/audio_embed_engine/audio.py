@@ -14,6 +14,7 @@ import soxr
 type Audio = np.ndarray  # float32 mono at the model's sample rate
 SAMPLE_RATE = 16_000
 FRAME, HOP, BANDS = 512, 256, 96
+MIN_SECONDS = 3.0  # previews are ~30 s; anything this short is broken (and EffNet needs >= 2.05 s)
 
 
 class DecodeError(Exception):
@@ -36,8 +37,8 @@ def decode(data: bytes, sample_rate: int = SAMPLE_RATE) -> Audio:
             source_rate = f.samplerate
     except Exception as e:  # libsndfile raises a grab bag of types on bad input
         raise DecodeError(str(e)) from e
-    if pcm.size == 0:
-        raise DecodeError("empty audio")
+    if len(pcm) < MIN_SECONDS * source_rate:
+        raise DecodeError(f"audio too short: {len(pcm) / source_rate:.1f} s")
     return soxr.resample(pcm.mean(axis=1), source_rate, sample_rate, quality="HQ").astype(np.float32)
 
 

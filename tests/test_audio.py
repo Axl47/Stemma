@@ -35,9 +35,13 @@ def test_decode_mp3_with_empty_id3_header() -> None:
     assert abs(len(audio) - 3 * 16_000) < 2_000  # MP3 encoder padding
 
 
-def test_decode_garbage_raises() -> None:
+def test_decode_rejects_garbage_and_clips_too_short_to_embed() -> None:
     with pytest.raises(DecodeError):
         decode(b"not audio at all" * 100)
+    buf = io.BytesIO()
+    sf.write(buf, _signal(1.0, 44_100), 44_100, format="MP3")
+    with pytest.raises(DecodeError, match="too short"):
+        decode(buf.getvalue())
 
 
 def test_patches_shape_and_short_audio() -> None:

@@ -17,7 +17,7 @@ import numpy as np
 from .audio import Audio, DecodeError, decode
 from .cache import Cache, Tags
 from .deezer import Deezer, DeezerError, Preview
-from .models import Model
+from .models import Embedding, Model
 from .types import Status, Track
 
 
@@ -65,6 +65,13 @@ def _fetch(dz: Deezer, track: Track, sample_rate: int) -> tuple[_Fetched | _Fail
     return result, time.perf_counter() - start
 
 
+def _embed_one(model: Model, audio: Audio) -> Embedding | Exception:
+    try:
+        return model.embed([audio])[0]
+    except Exception as e:  # noqa: BLE001
+        return e
+
+
 def embed_tracks(
     tracks: Iterable[Track],
     cache: Cache,
@@ -94,11 +101,20 @@ def embed_tracks(
         if not batch:
             return
         t = time.perf_counter()
-        embs = model.embed([f.audio for f in batch])
+        try:
+            embedded: list[tuple[_Fetched, Embedding | Exception]] = list(
+                zip(batch, model.embed([f.audio for f in batch]), strict=True)
+            )
+        except Exception:  # noqa: BLE001 -- isolate the bad track(s) instead of losing the batch
+            embedded = [(f, _embed_one(model, f.audio)) for f in batch]
         stats.inference_s += time.perf_counter() - t
-        for f, e in zip(batch, embs, strict=True):
-            cache.put_ok(f.track.cache_key, model_id, e.vector, e.tags, f.deezer_id)
-        stats.statuses["ok"] += len(batch)
+        for f, e in embedded:
+            if isinstance(e, Exception):
+                cache.put_failure(f.track.cache_key, model_id, "error", f"embed: {type(e).__name__}: {e}", f.deezer_id)
+                stats.statuses["error"] += 1
+            else:
+                cache.put_ok(f.track.cache_key, model_id, e.vector, e.tags, f.deezer_id)
+                stats.statuses["ok"] += 1
         cache.commit()
         batch.clear()
         if on_progress:

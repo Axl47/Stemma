@@ -3,7 +3,7 @@
 Deezer allows ~50 API calls per 5 s per IP. Exceeding it returns HTTP 200 with
 `{"error": {"code": 4, "message": "Quota limit exceeded"}}` (measured 2026-11-06),
 so we throttle client-side and back off a full window if we still trip it.
-Preview MP3s are served from a CDN that is not counted against that quota.
+Preview MP3s come from a CDN outside that quota, which still answers 429 under sustained load.
 """
 
 import re
@@ -75,10 +75,13 @@ class Deezer:
         max_calls: int = 45,  # headroom under the measured ~50 / 5 s
         window: float = 5.0,
         retries: int = 4,
+        download_retries: int = 5,
     ) -> None:
         self.client = client or httpx.Client(timeout=20, follow_redirects=True)
         self.limiter = RateLimiter(max_calls, window)
         self.retries = retries
+        self.download_retries = download_retries
+        self._cdn_resume_at = 0.0  # monotonic time before which no thread starts a download
 
     @property
     def api_calls(self) -> int:
@@ -128,17 +131,30 @@ class Deezer:
         return "no_preview" if found_without_preview else "not_found"
 
     def download(self, preview: Preview) -> bytes:
-        """Fetch the preview MP3 (CDN, not rate limited). Retries transient failures."""
-        for attempt in range(self.retries + 1):
+        """Fetch the preview MP3 from Deezer's CDN. It isn't covered by the API quota but does return
+        429 under sustained load (~0.4% of a 5k-track run), so a 429 pauses *all* downloads."""
+        for attempt in range(self.download_retries + 1):
+            if (wait := self._cdn_resume_at - time.monotonic()) > 0:
+                time.sleep(wait)
             try:
                 r = self.client.get(preview.url)
+                if r.status_code == 429:
+                    pause = _retry_after(r) or 2.0 * 2**attempt  # 2, 4, 8, 16, 32 s
+                    self._cdn_resume_at = max(self._cdn_resume_at, time.monotonic() + pause)
                 r.raise_for_status()
                 return r.content
             except httpx.HTTPError as e:
-                if attempt == self.retries:
+                if attempt == self.download_retries:
                     raise DeezerError(f"download {preview.deezer_id}: {e}") from e
                 time.sleep(0.5 * 2**attempt)
         raise AssertionError("unreachable")
+
+
+def _retry_after(r: httpx.Response) -> float | None:
+    try:
+        return float(r.headers["retry-after"])
+    except KeyError, ValueError:
+        return None
 
 
 def _norm(s: str) -> str:
@@ -153,12 +169,10 @@ def _clean_title(title: str) -> str:
 
 def _search_queries(track: Track) -> list[str]:
     # Deezer's advanced `artist:"…" track:"…"` syntax returned nothing in testing; plain queries work.
+    # Blank metadata (e.g. Spotify placeholders for unavailable tracks) would be rejected by Deezer.
     artist = track.artists[0] if track.artists else ""
-    queries = [f"{artist} {track.title}".strip()]
-    cleaned = f"{artist} {_clean_title(track.title)}".strip()
-    if cleaned != queries[0]:
-        queries.append(cleaned)
-    return queries
+    queries = [f"{artist} {track.title}".strip(), f"{artist} {_clean_title(track.title)}".strip()]
+    return [q for i, q in enumerate(queries) if q and q not in queries[:i]]
 
 
 def _matches(track: Track, cand: Json) -> bool:

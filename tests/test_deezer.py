@@ -58,3 +58,16 @@ def test_found_without_preview_is_no_preview() -> None:
         return httpx.Response(200, json={"data": []})
 
     assert client(handler).resolve(TRACK) == "no_preview"
+
+
+def test_cdn_429_backs_off_and_retries() -> None:
+    responses = iter([httpx.Response(429, headers={"retry-after": "0.01"}), httpx.Response(200, content=b"mp3")])
+    assert client(lambda req: next(responses)).download(Preview(1, "https://cdn/p.mp3")) == b"mp3"
+
+
+def test_blank_metadata_is_not_found_without_searching() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"unexpected request {req.url}")
+
+    blank = Track(isrc=None, title="", artists=("",), duration_ms=0, key="spotify-placeholder")
+    assert client(handler).resolve(blank) == "not_found"

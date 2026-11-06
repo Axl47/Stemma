@@ -17,10 +17,10 @@ class FakeDeezer(Deezer):
 
     def resolve(self, track: Track) -> Resolution:
         self.resolved.append(track.cache_key)
-        return "not_found" if track.cache_key in self.missing else Preview(1, "https://example/preview.mp3")
+        return "not_found" if track.cache_key in self.missing else Preview(1, track.cache_key)
 
     def download(self, preview: Preview) -> bytes:
-        return b"mp3"
+        return preview.url.encode()  # lets fake decoders know which track they got
 
 
 class FakeModel:
@@ -75,3 +75,20 @@ def test_lookup_echoes_caller_key_and_reports_pending(tmp_path) -> None:
         ("spotify4", "pending"),
     ]
     assert results[0].vector is not None and results[0].vector.tolist() == pytest.approx([0.6, 0.8])
+
+
+def test_one_bad_track_does_not_sink_the_batch(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Picky(FakeModel):
+        def embed(self, audios: list[np.ndarray]) -> list[Embedding]:
+            if any(len(a) == 1 for a in audios):
+                raise ValueError("bad audio")
+            return super().embed(audios)
+
+    sizes = {"GOOD1": 16_000, "BAD": 1, "GOOD2": 16_000}
+    monkeypatch.setattr(
+        "audio_embed_engine.engine.decode", lambda data, rate: np.zeros(sizes[data.decode()], np.float32)
+    )
+    cache = Cache(tmp_path / "c.sqlite")
+    stats = embed_tracks([track(k) for k in sizes], cache, Picky(), deezer=FakeDeezer(set()))
+    assert stats.statuses == {"ok": 2, "error": 1}
+    assert cache.get_many(["BAD"], "fake/v1")["BAD"].status == "error"
