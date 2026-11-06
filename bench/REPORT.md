@@ -180,6 +180,46 @@ close neighbour. The popularity row shows that this bias alone is worth 0.21, an
 embeddings more than double it. The suggested scorer for the sorter is kNN over playlist
 members, after excluding the catch-all playlist.
 
+## Full track vs preview (YouTube Music, 2026-11-06)
+
+Question: does embedding the whole song beat the 30 s Deezer preview? Full tracks came from
+YouTube Music (`bench/fetch_youtube.py`), and the comparison was done by `bench/full_vs_preview.py`.
+The model was the same and the 193 tracks were the same (150-track sample + fixture).
+
+**Fetching.** The sample was downloaded sequentially from the Mac's residential IP, with 3–8 s
+sleeps between tracks.
+
+- **Hit rate:** 195 / 202 unique tracks (96.5%). Most are found through the songs index. ISRC
+  search found 3 more, and video search (official audio on artist channels) found 5 more.
+- **Failures:** two tracks need sign-in (a per-video gate), and five aren't on YouTube Music
+  under a matching artist, title and duration. Covers by other artists are correctly rejected.
+- **Bot checks:** none in ~52 minutes.
+- **Cost:** ~9 s per track (mostly yt-dlp's JS challenge), plus the sleep, so ~15 s per track.
+  Files average 3.6 MB.
+- **Server:** from the production server's datacenter IP, YouTube answered
+  "Sign in to confirm you're not a bot" for every track tried. This held with and without a JS
+  runtime.
+
+**Quality.** All metrics are with shared-artist pairs excluded.
+
+| input | pair AUC | recall@3 top-3 | recall@3 centroid | fixture style AUC | infer ms/track |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Deezer preview | 0.769 | 0.281 | 0.274 | 0.963 | 39 |
+| full track | 0.760 | 0.298 | 0.269 | 0.958 | 418 |
+| middle 30 s of full track | 0.741 | 0.306 | 0.246 | 0.962 | 42 |
+
+- **Pair AUC:** full minus preview is −0.010, with a paired bootstrap 95% CI of
+  −0.033 to +0.013. That is no measurable difference on average.
+- **How much vectors move:** the median cosine between a track's preview vector and its full
+  vector is 0.954, so for most songs the preview already captures the song's average sound.
+- **The tail:** the 10% of tracks below 0.87 are correct matches whose preview misses a
+  different section (e.g. Bad Bunny's "Después de la Playa", 0.68). In the quarter that moved
+  most, the full track placed the track better 8 times and worse 3 times (recall 0.280 → 0.314).
+  That fits "the full track helps exactly where the preview is unrepresentative", but n = 29
+  can't confirm it. A split this lopsided happens by chance ~23% of the time.
+- **What would decide it:** `bench/library_eval.py` on the full library (4,617 queries). That
+  needs the whole library downloaded first.
+
 ## Not verified
 
 - No GPU benchmark (Gaia), for the reason given above.

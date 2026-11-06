@@ -21,8 +21,16 @@ build-backend = "uv_build"
 
 [dependency-groups]
 bench = [
+    "av>=19.0.2",
     "torch>=2.15.0",
     "transformers>=5.22.1",
+    {include-group = "fetch"},
+]
+# Full-track downloads from YouTube Music (bench/fetch_youtube.py). `deno` is yt-dlp's JS runtime.
+fetch = [
+    "deno>=2.9.8",
+    "yt-dlp[default]>=2026.10.26",
+    "ytmusicapi>=1.12.3",
 ]
 dev = [
     "essentia>=2.1b6.dev1438",
