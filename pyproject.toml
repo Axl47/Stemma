@@ -37,5 +37,8 @@ audio-embed = "audio_embed_engine.cli:main"
 [tool.ruff]
 line-length = 120
 
+[tool.ruff.lint.per-file-ignores]
+"bench/*" = ["SIM115", "RUF007"]  # one-off scripts
+
 [tool.pyright]
 include = ["src", "tests"]
