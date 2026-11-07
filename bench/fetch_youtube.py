@@ -34,7 +34,9 @@ from audio_embed_engine.deezer import DURATION_TOLERANCE_S, _clean_title, _norm,
 from audio_embed_engine.types import Track, read_tracks
 
 BOT_CHECK = ("confirm you're not a bot", "sign in to confirm")
-SIGN_IN = "please sign in"  # per-video gate (likely age restriction): permanent, not a network problem
+# per-video gates (age restriction): permanent, not a network problem. Checked before BOT_CHECK,
+# since "Sign in to confirm your age" also contains "sign in to confirm".
+SIGN_IN = ("please sign in", "confirm your age")
 MAX_CONSECUTIVE_ERRORS = 5
 PARTIAL = (".part", ".ytdl")  # yt-dlp leftovers from an interrupted download
 
@@ -139,10 +141,11 @@ def main() -> None:
                     }
             except Exception as e:  # noqa: BLE001
                 msg = str(e)
-                if any(s in msg.lower() for s in BOT_CHECK):
+                gated = any(s in msg.lower() for s in SIGN_IN)
+                if not gated and any(s in msg.lower() for s in BOT_CHECK):
                     print(f"bot check after {i - 1} tracks, stopping: {msg}", file=sys.stderr)
                     break
-                row |= {"status": "sign_in" if SIGN_IN in msg.lower() else "error", "error": msg[:300]}
+                row |= {"status": "sign_in" if gated else "error", "error": msg[:300]}
             errors_in_a_row = errors_in_a_row + 1 if row["status"] == "error" else 0
             row["seconds"] = round(time.perf_counter() - t0, 2)
             log.write(json.dumps(row) + "\n")
