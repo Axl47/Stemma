@@ -7,7 +7,8 @@ Each track is searched on YouTube Music (songs first, i.e. official "Topic" audi
 and a result is accepted only if duration (±3 s), artist and title match, using the Deezer
 matcher's rules. The best audio stream is saved untouched as `<cache_key>.<ext>` (Opus/WebM or AAC/M4A,
 ~3-5 MB per track). Progress goes to `<out_dir>/manifest.jsonl`, one line per finished track,
-so the run resumes where it stopped; `error` rows are retried on resume. A bot-check answer, or
+so the run resumes where it stopped; `error` rows are retried on resume (`sign_in`, a per-video
+gate, is not). A bot-check answer, or
 MAX_CONSECUTIVE_ERRORS failures in a row (e.g. the network dropped), stops the run instead of
 burning through the list.
 
@@ -33,6 +34,7 @@ from audio_embed_engine.deezer import DURATION_TOLERANCE_S, _clean_title, _norm,
 from audio_embed_engine.types import Track, read_tracks
 
 BOT_CHECK = ("confirm you're not a bot", "sign in to confirm")
+SIGN_IN = "please sign in"  # per-video gate (likely age restriction): permanent, not a network problem
 MAX_CONSECUTIVE_ERRORS = 5
 PARTIAL = (".part", ".ytdl")  # yt-dlp leftovers from an interrupted download
 
@@ -94,7 +96,7 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     manifest = args.out_dir / "manifest.jsonl"
     rows = [json.loads(l) for l in manifest.open()] if manifest.exists() else []
-    done = {r["key"] for r in rows if r["status"] in ("ok", "not_found")}
+    done = {r["key"] for r in rows if r["status"] in ("ok", "not_found", "sign_in")}
     unique = {t.cache_key: t for t in read_tracks(args.tracks)}  # releases sharing an ISRC are one recording
     todo = [t for key, t in unique.items() if key not in done][: args.limit]
     yt = YTMusic()
@@ -140,7 +142,7 @@ def main() -> None:
                 if any(s in msg.lower() for s in BOT_CHECK):
                     print(f"bot check after {i - 1} tracks, stopping: {msg}", file=sys.stderr)
                     break
-                row |= {"status": "error", "error": msg[:300]}
+                row |= {"status": "sign_in" if SIGN_IN in msg.lower() else "error", "error": msg[:300]}
             errors_in_a_row = errors_in_a_row + 1 if row["status"] == "error" else 0
             row["seconds"] = round(time.perf_counter() - t0, 2)
             log.write(json.dumps(row) + "\n")
