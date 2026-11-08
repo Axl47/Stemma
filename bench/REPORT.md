@@ -220,6 +220,23 @@ sleeps between tracks.
 - **What would decide it:** `bench/library_eval.py` on the full library (4,617 queries). That
   needs the whole library downloaded first.
 
+## Full track vs preview, whole library (2026-11-08)
+
+`bench/library_eval.py` leave-one-out on the personal library, scoring playlists only from members
+sharing no artist with the query. Both models on the same 5,686 library entries (4,484 queries);
+full = whole YouTube Music track via `bench/embed_full.py`, preview = 30 s Deezer. CI is a paired
+bootstrap over queries, which treats queries as independent, so it is somewhat optimistic.
+
+| Metric | Preview | Full | Delta (95% CI) |
+|---|---|---|---|
+| top5 hit@3 | 0.595 | 0.621 | +0.026 (+0.016 .. +0.036) |
+| top5 recall@3 | 0.483 | 0.508 | +0.026 (+0.016 .. +0.035) |
+| centroid hit@3 | 0.468 | 0.505 | +0.037 (+0.026 .. +0.047) |
+| centroid recall@3 | 0.379 | 0.402 | +0.023 (+0.015 .. +0.032) |
+
+Popularity baseline recall@3 is 0.220. Full tracks are a small but consistent gain, unlike the
+sample benchmark above, which was too small to detect it. Most queries do not change.
+
 ## Not verified
 
 - No GPU benchmark (Gaia), for the reason given above.
