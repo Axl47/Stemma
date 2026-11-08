@@ -1,6 +1,10 @@
 """Full-library check: can embeddings place a track by an artist the user has never sorted?
 
-Usage: python bench/library_eval.py <library.json> <tracks.jsonl> [--db PATH]
+Usage: python bench/library_eval.py <library.json> <tracks.jsonl> [--db PATH] [--model ID] [--same-tracks-as ID]
+
+--model picks which cache rows to score (default: the engine's preview model). --same-tracks-as
+restricts scoring to tracks that also have a vector under that model, so two models compare on
+identical tracks (e.g. full YouTube tracks vs previews).
 
 Catch-all playlists holding over half the library are ignored. Every track that sits in at least one playlist becomes a leave-one-out query. Playlists are
 scored only from members that share NO artist (by Spotify artist id) with the query, which
@@ -24,11 +28,17 @@ def main() -> None:
     ap.add_argument("tracks")
     ap.add_argument("--db", default=str(default_db()))
     ap.add_argument("--k", type=int, default=3)
+    ap.add_argument("--model", default=DiscogsEffnet.id)
+    ap.add_argument("--same-tracks-as")
     args = ap.parse_args()
 
     lib = json.load(open(args.library))
-    results = {r.key: r.vector for r in lookup(read_tracks(args.tracks), Cache(args.db), DiscogsEffnet.id)}
+    tracks, cache = read_tracks(args.tracks), Cache(args.db)
+    results = {r.key: r.vector for r in lookup(tracks, cache, args.model)}
     keys = [k for k, v in results.items() if v is not None]
+    if args.same_tracks_as:
+        other = {r.key for r in lookup(tracks, cache, args.same_tracks_as) if r.vector is not None}
+        keys = [k for k in keys if k in other]
     index = {k: i for i, k in enumerate(keys)}
     emb = np.stack([results[k] for k in keys])
     artists = [frozenset(a["id"] for a in lib["tracks"][k]["artists"]) for k in keys]
