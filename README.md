@@ -76,6 +76,7 @@ Writes one line per input line, in input order, duplicates included:
 {"key": "0ZsdexTL4uQSBgYHSfRHtt", "status": "no_preview"}
 ```
 
+- `--prefer-model ID` uses that model id's cached vector where one exists and the default model's elsewhere, e.g. `discogs-effnet-1/mean-hop128/full-yt-v1` from `bench/embed_full.py`.
 - `key` is your `key`, or the ISRC when you didn't pass one.
 - `vector` is present only when `status` is `ok`. It is 1280 float32 values, L2-normalised,
   so the dot product is cosine similarity.

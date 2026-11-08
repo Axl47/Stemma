@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 
 from audio_embed_engine import Cache, Embedding, Track, embed_tracks, lookup
+from audio_embed_engine.cli import prefer
+from audio_embed_engine.engine import Result
 from audio_embed_engine.deezer import Deezer, Preview, Resolution
 
 
@@ -92,3 +94,11 @@ def test_one_bad_track_does_not_sink_the_batch(tmp_path, monkeypatch: pytest.Mon
     stats = embed_tracks([track(k) for k in sizes], cache, Picky(), deezer=FakeDeezer(set()))
     assert stats.statuses == {"ok": 2, "error": 1}
     assert cache.get_many(["BAD"], "fake/v1")["BAD"].status == "error"
+
+
+def test_export_prefers_model_and_falls_back_per_track():
+    v, w = np.ones(2, np.float32), np.zeros(2, np.float32)
+    preferred = [Result("a", "ok", v, None), Result("b", "pending", None, None)]
+    fallback = [Result("a", "ok", w, None), Result("b", "ok", w, None)]
+    assert [r.vector is v for r in prefer(preferred, fallback)] == [True, False]
+    assert prefer(preferred, fallback)[1].status == "ok"

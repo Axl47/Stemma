@@ -85,8 +85,16 @@ def _write_jsonl(results: list[Result], out: TextIO, tags: bool) -> None:
         out.write(json.dumps(row) + "\n")
 
 
+def prefer(preferred: list[Result], fallback: list[Result]) -> list[Result]:
+    """Per line of the same track list: the preferred result if it has a vector, else the fallback."""
+    return [p if p.vector is not None else f for p, f in zip(preferred, fallback, strict=True)]
+
+
 def cmd_export(args: argparse.Namespace) -> None:
-    results = lookup(read_tracks(args.tracks), Cache(args.db), DiscogsEffnet.id)
+    tracks, cache = read_tracks(args.tracks), Cache(args.db)
+    results = lookup(tracks, cache, DiscogsEffnet.id)
+    if args.prefer_model:
+        results = prefer(lookup(tracks, cache, args.prefer_model), results)
     if args.format == "npy":
         if not args.out:
             sys.exit("--format npy needs --out PREFIX")
@@ -114,6 +122,7 @@ def main() -> None:
     x.add_argument("--format", choices=["jsonl", "npy"], default="jsonl")
     x.add_argument("--out", help="file (jsonl; default stdout) or PREFIX for PREFIX.npy + PREFIX.index.jsonl")
     x.add_argument("--tags", action="store_true", help="include style/mood tags (jsonl only)")
+    x.add_argument("--prefer-model", help="use this model id's vector where cached, the default model's elsewhere")
     x.set_defaults(func=cmd_export)
 
     args = ap.parse_args()
