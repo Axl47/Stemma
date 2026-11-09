@@ -98,6 +98,14 @@ Writes one line per input line, in input order, duplicates included:
 | `error` | unexpected exception (bug); message kept in the cache | 1 hour |
 | `pending` | (export only) never processed for this model | n/a |
 
+### `classify <labels.jsonl> --vectors <vectors.jsonl> --out <classifier.json>`
+
+Trains one linear classifier per label from `export`'s vectors, using only NumPy (seconds on a laptop). Each input line is
+`{"key": "...", "artists": ["id", ...], "labels": ["playlist", ...]}`; `labels` may be empty, and such songs are only scored.
+Output: `keys`, `playlists` (`id`, `auc`, `cutoff`), `scores` (keys × playlists) and `picks` (per key, the one playlist index
+that sound alone should choose, or null). A labelled song's score comes from models that never saw it or its artists.
+Options: `--confidence 0.9`, `--min-trust 0.9`, `--min-size 12`. See `bench/REPORT.md` for how the defaults were tuned.
+
 ## Library API
 
 ```python

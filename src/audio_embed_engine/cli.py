@@ -1,4 +1,5 @@
-"""`audio-embed` command line: `embed` fills the cache, `export` reads vectors back out.
+"""`audio-embed` command line: `embed` fills the cache, `export` reads vectors back out, `classify`
+trains per-playlist classifiers from those vectors.
 
 Progress goes to stderr; machine-readable output (embed summary, export rows) to stdout or --out.
 """
@@ -7,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TextIO
@@ -14,6 +16,7 @@ from typing import TextIO
 import numpy as np
 
 from .cache import Cache
+from .classifier import CONFIDENCE, MIN_TRUST, train
 from .engine import EmbedStats, Result, embed_tracks, lookup
 from .models import DiscogsEffnet
 from .types import read_tracks
@@ -104,6 +107,57 @@ def cmd_export(args: argparse.Namespace) -> None:
         _write_jsonl(results, out, args.tags)
 
 
+def cmd_classify(args: argparse.Namespace) -> None:
+    vectors: dict[str, list[float]] = {}
+    with open(args.vectors) as f:
+        for line in f:
+            row = json.loads(line)
+            if row.get("vector"):
+                vectors[row["key"]] = row["vector"]
+    songs: dict[str, dict] = {}
+    with open(args.labels) as f:
+        for line in f:
+            row = json.loads(line)
+            if row["key"] in vectors:
+                songs.setdefault(row["key"], row)
+    keys = list(songs)
+    counts = Counter(label for s in songs.values() for label in s["labels"])
+    playlists = sorted(p for p, n in counts.items() if n >= args.min_size)
+    column = {p: i for i, p in enumerate(playlists)}
+
+    x = np.array([vectors[k] for k in keys], np.float32)
+    y = np.zeros((len(keys), len(playlists)), bool)
+    for i, k in enumerate(keys):
+        for label in songs[k]["labels"]:
+            if label in column:
+                y[i, column[label]] = True
+    # a song with no listed artist still needs a fold of its own
+    artists = [frozenset(songs[k]["artists"]) or frozenset({k}) for k in keys]
+    primary = [(songs[k]["artists"] or [k])[0] for k in keys]
+    scores, picks, fits = train(x, y, artists, primary, confidence=args.confidence, min_trust=args.min_trust)
+
+    output = {
+        "confidence": args.confidence,
+        "keys": keys,
+        "playlists": [
+            {"id": p, "auc": None if np.isnan(f.auc) else round(f.auc, 3), "cutoff": f.cutoff}
+            for p, f in zip(playlists, fits, strict=True)
+        ],
+        "scores": np.round(scores, 3).tolist(),
+        "picks": picks,
+    }
+    with open(args.out, "w") as f:
+        json.dump(output, f, separators=(",", ":"))
+    summary = {
+        "songs": len(keys),
+        "labelled": int(y.any(1).sum()),
+        "playlists": len(playlists),
+        "can_auto_pick": sum(f.cutoff is not None for f in fits),
+        "auto_picks": sum(p is not None for p in picks),
+    }
+    print(json.dumps(summary))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="audio-embed", description=__doc__)
     ap.add_argument("--db", type=Path, default=default_db(), help="SQLite cache (env AUDIO_EMBED_DB)")
@@ -124,6 +178,15 @@ def main() -> None:
     x.add_argument("--tags", action="store_true", help="include style/mood tags (jsonl only)")
     x.add_argument("--prefer-model", help="use this model id's vector where cached, the default model's elsewhere")
     x.set_defaults(func=cmd_export)
+
+    c = sub.add_parser("classify", help="train a sound classifier per playlist and score every song")
+    c.add_argument("labels", help='JSONL: {"key", "artists": [ids], "labels": [playlist ids]} per line; labels may be empty')
+    c.add_argument("--vectors", required=True, help="JSONL from `export`")
+    c.add_argument("--out", required=True)
+    c.add_argument("--confidence", type=float, default=CONFIDENCE, help="chance of belonging needed to auto-pick")
+    c.add_argument("--min-trust", type=float, default=MIN_TRUST, help="lowest held-out playlist AUC that may auto-pick")
+    c.add_argument("--min-size", type=int, default=12, help="ignore playlists with fewer embedded songs")
+    c.set_defaults(func=cmd_classify)
 
     args = ap.parse_args()
     args.func(args)

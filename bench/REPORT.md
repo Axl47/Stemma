@@ -281,3 +281,38 @@ missing membership isn't proof a song doesn't fit):
 
 Control: with labels shuffled, playlist AUCs run 0.40–0.61 (median 0.49). Track-level PCA: recall@3 for
 ridge is 0.668 at 1280-d, 0.662 at 256-d, 0.655 at 128-d; int8 quantisation at 1280-d changes nothing (0.669).
+
+## Classifier tuning (2026-11-09)
+
+`bench/classifier_tuning.py` on the same songs and playlists, 2 × 5 outer folds, with cutoffs chosen only from held-out
+scores inside the training songs. **These replace the auto-check precision in the section above:** that table came from one
+5-fold split, and this larger test is lower (about 60–67% rather than 67–77%). Results also vary widely by fold (22–95%).
+
+The ridge penalty is flat from 0.3 to 3 (recall@3 0.645, 0.648, 0.649) and worse above it, so it stays at 3. Aiming each
+playlist at a target precision directly (lowest score whose held-out picks reach it) undershot: aiming for 70% gave 51–57%.
+Picking by a fitted confidence curve did better.
+
+| chance needed | playlist AUC ≥ | only the top playlist | checks per 100 songs | already in the playlist | right per 100 songs |
+| ---: | ---: | --- | ---: | ---: | ---: |
+| 0.5 | 0.90 | yes | 31 | 59% | 18 |
+| 0.7 | 0.90 | yes | 22 | 62% | 14 |
+| 0.8 | 0.90 | yes | 17 | 64% | 11 |
+| **0.9** | **0.90** | **yes** | **12** | **67%** | **8** |
+| 0.9 | 0.90 | no | 14 | 65% | 8 |
+| 0.9 | 0.93 | yes | 10 | 64% | 7 |
+
+Chosen defaults: chance ≥ 0.9, AUC ≥ 0.90, top playlist only. It has the highest precision of the grid, because a wrong
+automatic check costs more than a missed one. Loosening to 0.7 gives more checks at a small precision cost.
+
+In the sorter (`pnpm eval`, songs held out at random), compared with the neighbour vote:
+
+| songs by artists never sorted | vote | classifier |
+| --- | ---: | ---: |
+| real playlists in top 1 | 30% | 33% |
+| top 3 | 55% | 60% |
+| top 5 | 65% | 72% |
+| pre-checks per song / right | 0 / n/a | 0.05 / 71% (n = 28) |
+
+Songs by known artists keep the same ranking and precheck precision (89%), but only because sound-only picks are limited to
+new artists: allowing them for known artists dropped precheck precision to 83%. Playlists mostly made of one album (e.g.
+Hamilton) are left out of training, since they score high on shared production and drew 14 of 22 auto-checks in the queue.

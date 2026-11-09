@@ -20,27 +20,11 @@ from pathlib import Path
 
 import numpy as np
 
+from audio_embed_engine.classifier import auc, clean_train, folds_by_artist, platt, score_ridge
+
 ALL_SONGS = "1xVoRBtLYULxvva0k1OwMn"  # src/core/config.ts in the sorter
 IGNORED = {"3fKpVGfURs7G9L3WxrDhtr"}
-VOTE_K, TOP_K, RIDGE_LAMBDA = 15, 5, 3.0
-
-
-def auc(scores: np.ndarray, pos: np.ndarray) -> float:
-    """Mann-Whitney AUC with tied ranks handled; nan when a class is empty."""
-    n1, n0 = int(pos.sum()), int((~pos).sum())
-    if not n1 or not n0:
-        return float("nan")
-    order = scores.argsort()
-    ranks = np.empty(len(scores), float)
-    ranks[order] = np.arange(1, len(scores) + 1)
-    sorted_s = scores[order]
-    # average the ranks of tied scores (kNN votes tie a lot)
-    start = 0
-    for end in np.flatnonzero(np.r_[sorted_s[1:] != sorted_s[:-1], True]) + 1:
-        if end - start > 1:
-            ranks[order[start:end]] = (start + 1 + end) / 2
-        start = end
-    return float((ranks[pos].sum() - n1 * (n1 + 1) / 2) / (n1 * n0))
+VOTE_K, TOP_K = 15, 5
 
 
 def average_precision(scores: np.ndarray, pos: np.ndarray) -> float:
@@ -48,31 +32,6 @@ def average_precision(scores: np.ndarray, pos: np.ndarray) -> float:
         return float("nan")
     hits = pos[scores.argsort()[::-1]]
     return float((np.cumsum(hits)[hits] / (np.flatnonzero(hits) + 1)).mean())
-
-
-def platt(scores: np.ndarray, pos: np.ndarray, iters: int = 50, l2: float = 1e-3) -> tuple[float, float]:
-    """Fit P(pos|s) = sigmoid(a*s + b) by Newton with step halving (plain Newton diverges on rare classes)."""
-    mu, sd = float(scores.mean()), float(scores.std()) or 1.0
-    z, y = (scores - mu) / sd, pos.astype(float)
-    n = len(z)
-
-    def loss(a: float, b: float) -> float:
-        return float(np.logaddexp(0, -(2 * y - 1) * (a * z + b)).mean() + l2 * a * a / 2)
-
-    a, b = 0.0, float(np.log((y.mean() + 1e-4) / (1 - y.mean() + 1e-4)))
-    for _ in range(iters):
-        p = 1 / (1 + np.exp(-np.clip(a * z + b, -30, 30)))
-        w = np.maximum(p * (1 - p), 1e-9)
-        grad = np.array([(z * (p - y)).sum() / n + l2 * a, (p - y).sum() / n])
-        hess = np.array([[(w * z * z).sum() / n + l2, (w * z).sum() / n], [(w * z).sum() / n, w.sum() / n + 1e-9]])
-        da, db = np.linalg.solve(hess, grad)
-        step, before = 1.0, loss(a, b)
-        while step > 1e-4 and loss(a - step * da, b - step * db) > before:
-            step /= 2
-        a, b = a - step * da, b - step * db
-        if max(abs(step * da), abs(step * db)) < 1e-6:
-            break
-    return a / sd, b - a * mu / sd
 
 
 def score_knn(sims: np.ndarray, members: list[np.ndarray], k: int) -> np.ndarray:
@@ -99,28 +58,6 @@ def score_vote(sims: np.ndarray, y_train: np.ndarray, k: int = VOTE_K) -> np.nda
     top = np.argpartition(sims, -k, axis=1)[:, -k:]
     w = np.maximum(np.take_along_axis(sims, top, 1), 0)
     return (w[:, :, None] * y_train[top]).sum(1) / np.maximum(w.sum(1, keepdims=True), 1e-9)
-
-
-def score_ridge(x_test: np.ndarray, x_train: np.ndarray, y_train: np.ndarray, lam: float = RIDGE_LAMBDA) -> np.ndarray:
-    """One linear classifier per playlist in closed form (dual ridge: one solve covers all playlists)."""
-    mean_x, mean_y = x_train.mean(0), y_train.mean(0)
-    a = x_train - mean_x
-    alpha = np.linalg.solve(a @ a.T + lam * np.eye(len(a)), y_train - mean_y)
-    return (x_test - mean_x) @ (a.T @ alpha) + mean_y
-
-
-def clean_train(train: np.ndarray, test: np.ndarray, artists: list[frozenset[str]]) -> np.ndarray:
-    """Training songs sharing no artist with any test song."""
-    held = set().union(*(artists[i] for i in test))
-    return np.array([i for i in train if not artists[i] & held], dtype=int)
-
-
-def folds_by_artist(idx: np.ndarray, primary: list[str], n: int, seed: int) -> list[np.ndarray]:
-    names = sorted({primary[i] for i in idx})
-    rng = np.random.default_rng(seed)
-    rng.shuffle(names)
-    fold_of = {a: j % n for j, a in enumerate(names)}
-    return [np.array([i for i in idx if fold_of[primary[i]] == f], dtype=int) for f in range(n)]
 
 
 def all_scores(x, y, test, train) -> dict[str, np.ndarray]:
