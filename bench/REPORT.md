@@ -250,3 +250,34 @@ sample benchmark above, which was too small to detect it. Most queries do not ch
 
   They are display extras and were not evaluated.
 - Long-run CDN behaviour beyond one ~12-minute bulk run.
+
+## Per-playlist sound signal (2026-11-09)
+
+`bench/playlist_signal.py`: 3,500 sorted songs and the 39 playlists the sorter can suggest from sound
+(≥12 embedded songs; no hidden, ignored or artist-rule playlists). Vectors are full-track where available.
+Five folds by primary artist; training drops every song sharing an artist with a test song. Weights and
+calibrators come from an inner split of the training songs only. A whole nested run takes ~8 s on the M1 Pro.
+
+| scorer | recall@3 | hit@3 |
+| --- | ---: | ---: |
+| linear classifier per playlist (ridge) | **0.668** | 0.711 |
+| ridge, Platt-calibrated per playlist | 0.645 | 0.698 |
+| mean of 5 most similar members | 0.635 | 0.682 |
+| similarity-weighted vote of 15 neighbours (the sorter's audio signal) | 0.614 | 0.665 |
+| that vote × per-playlist AUC weight | 0.606 | 0.656 |
+| centroid | 0.522 | 0.578 |
+| always the 3 biggest playlists | 0.334 | n/a |
+
+Ridge minus vote: +0.054 (95% CI +0.041 to +0.067, bootstrap over songs). The weighted vote minus vote:
+−0.008 (−0.016 to +0.002), so a per-playlist multiplier does not help ranking. Per-playlist AUC is useful
+as a gate on confident picks instead. Share of picks that are real memberships (a lower bound, since a
+missing membership isn't proof a song doesn't fit):
+
+| playlist AUC, from inner folds | P ≥ 0.5 | P ≥ 0.7 | P ≥ 0.9 |
+| --- | ---: | ---: | ---: |
+| ≥ 0.90 | 0.59 | 0.67 | 0.77 |
+| 0.75–0.90 | 0.28 | 0.23 | 0.17 |
+| < 0.75 | 0.35 | 0.03 | 0.00 |
+
+Control: with labels shuffled, playlist AUCs run 0.40–0.61 (median 0.49). Track-level PCA: recall@3 for
+ridge is 0.668 at 1280-d, 0.662 at 256-d, 0.655 at 128-d; int8 quantisation at 1280-d changes nothing (0.669).
