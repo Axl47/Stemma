@@ -1,5 +1,5 @@
 """`audio-embed` command line: `embed` fills the cache, `export` reads vectors back out, `classify`
-trains per-playlist classifiers from those vectors.
+trains per-playlist classifiers from those vectors, and `languages` labels lyrics for `classify`.
 
 Progress goes to stderr; machine-readable output (embed summary, export rows) to stdout or --out.
 """
@@ -16,8 +16,9 @@ from typing import TextIO
 import numpy as np
 
 from .cache import Cache
-from .classifier import CONFIDENCE, MIN_TRUST, train
+from .classifier import CONFIDENCE, MIN_TRUST, train, with_language
 from .engine import EmbedStats, Result, embed_tracks, lookup
+from .language import detect_language
 from .models import DiscogsEffnet
 from .types import read_tracks
 
@@ -134,10 +135,12 @@ def cmd_classify(args: argparse.Namespace) -> None:
     # a song with no listed artist still needs a fold of its own
     artists = [frozenset(songs[k]["artists"]) or frozenset({k}) for k in keys]
     primary = [(songs[k]["artists"] or [k])[0] for k in keys]
+    x, languages = with_language(x, [songs[k].get("language") for k in keys], y.any(1))
     scores, picks, fits = train(x, y, artists, primary, confidence=args.confidence, min_trust=args.min_trust)
 
     output = {
         "confidence": args.confidence,
+        "languages": languages,
         "keys": keys,
         "playlists": [
             {"id": p, "auc": None if np.isnan(f.auc) else round(f.auc, 3), "cutoff": f.cutoff}
@@ -152,10 +155,22 @@ def cmd_classify(args: argparse.Namespace) -> None:
         "songs": len(keys),
         "labelled": int(y.any(1).sum()),
         "playlists": len(playlists),
+        "languages": languages,
         "can_auto_pick": sum(f.cutoff is not None for f in fits),
         "auto_picks": sum(p is not None for p in picks),
     }
     print(json.dumps(summary))
+
+
+def cmd_languages(args: argparse.Namespace) -> None:
+    found = 0
+    with open(args.lyrics) as f, open(args.out, "w") as out:
+        for line in f:
+            row = json.loads(line)
+            if row["status"] == "ok" and (language := detect_language(row.get("plain") or "")):
+                out.write(json.dumps({"key": row["key"], "language": language}) + "\n")
+                found += 1
+    print(json.dumps({"songs_with_language": found}))
 
 
 def main() -> None:
@@ -180,13 +195,21 @@ def main() -> None:
     x.set_defaults(func=cmd_export)
 
     c = sub.add_parser("classify", help="train a sound classifier per playlist and score every song")
-    c.add_argument("labels", help='JSONL: {"key", "artists": [ids], "labels": [playlist ids]} per line; labels may be empty')
+    c.add_argument(
+        "labels",
+        help='JSONL: {"key", "artists": [ids], "labels": [playlist ids], "language"?: code} per line; labels may be empty',
+    )
     c.add_argument("--vectors", required=True, help="JSONL from `export`")
     c.add_argument("--out", required=True)
     c.add_argument("--confidence", type=float, default=CONFIDENCE, help="chance of belonging needed to auto-pick")
     c.add_argument("--min-trust", type=float, default=MIN_TRUST, help="lowest held-out playlist AUC that may auto-pick")
     c.add_argument("--min-size", type=int, default=12, help="ignore playlists with fewer embedded songs")
     c.set_defaults(func=cmd_classify)
+
+    g = sub.add_parser("languages", help="guess each song's language from its fetched lyrics")
+    g.add_argument("lyrics", help='JSONL: {"key", "status", "plain"} per line, as from bench/fetch_lyrics.py')
+    g.add_argument("--out", required=True, help='JSONL: {"key", "language"} for each song with a confident guess')
+    g.set_defaults(func=cmd_languages)
 
     args = ap.parse_args()
     args.func(args)
