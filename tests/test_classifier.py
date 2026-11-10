@@ -1,10 +1,46 @@
 import numpy as np
 
-from audio_embed_engine.classifier import auc, train
+from audio_embed_engine.classifier import auc, score_ridge, train, with_language
+from audio_embed_engine.language import detect_language
 
 
 def unit(x: np.ndarray) -> np.ndarray:
     return (x / np.linalg.norm(x, axis=1, keepdims=True)).astype(np.float32)
+
+
+def test_language_separates_songs_that_sound_alike() -> None:
+    rng = np.random.default_rng(0)
+    n = 300
+    x = unit(rng.normal(size=(n, 32)))
+    languages = ["es" if i % 2 else "en" for i in range(n)]
+    y = np.array([[i % 2 == 1] for i in range(n)])
+
+    joined, names = with_language(x, languages, np.ones(n, bool), min_songs=15)
+    held_out = np.arange(0, n, 5)
+    train_rows = np.setdiff1d(np.arange(n), held_out)
+    plain = score_ridge(x[held_out], x[train_rows], y[train_rows].astype(float))
+    enriched = score_ridge(joined[held_out], joined[train_rows], y[train_rows].astype(float))
+
+    assert names == ["en", "es"]
+    assert auc(enriched[:, 0], y[held_out, 0]) > 0.95
+    assert auc(plain[:, 0], y[held_out, 0]) < 0.7
+
+
+def test_rare_or_unknown_language_leaves_a_song_on_sound_alone() -> None:
+    x = unit(np.random.default_rng(1).normal(size=(4, 8)))
+
+    joined, names = with_language(x, ["en", "en", "sw", None], np.ones(4, bool), min_songs=2)
+
+    assert names == ["en"]
+    assert np.allclose(joined[2:, :8], x[2:]) and np.allclose(joined[2:, 8:], 0)
+    assert np.allclose(np.linalg.norm(joined, axis=1), 1)
+
+
+def test_detect_language_reads_scripts_and_declines_short_text() -> None:
+    english = "I walk alone along the river every night and think about the words you said to me " * 3
+    assert detect_language(english) == "en"
+    assert detect_language(english + "あなたのことを") == "ja"
+    assert detect_language("too short") is None
 
 
 def test_cutoff_only_for_a_playlist_sound_can_separate() -> None:

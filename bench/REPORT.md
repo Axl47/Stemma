@@ -316,3 +316,26 @@ In the sorter (`pnpm eval`, songs held out at random), compared with the neighbo
 Songs by known artists keep the same ranking and precheck precision (89%), but only because sound-only picks are limited to
 new artists: allowing them for known artists dropped precheck precision to 83%. Playlists mostly made of one album (e.g.
 Hamilton) are left out of training, since they score high on shared production and drew 14 of 22 auto-checks in the queue.
+
+## Lyric language as a signal (2026-11-09)
+
+Lyrics from LRCLIB (4,771 songs; 84% of the sorted songs) under the same never-seen-artist folds as above, 3,499 songs and
+39 playlists, three repeats. The lyric comparison ran from throwaway scripts; `pnpm eval` in the sorter reproduces the app rows.
+
+| features added to sound | recall@3 | change (95% CI) |
+| --- | ---: | ---: |
+| none | 66.0% | |
+| language, one label per song, weight 0.3 | 69.7% | +3.7 (3.0 to 4.3) |
+| language, share per section of the song | 69.8% | +3.8 (3.2 to 4.4) |
+| shares, plus an "instrumental" flag | 69.5% | +3.5 (2.9 to 4.1) |
+
+Weights from 0.15 to 0.6 land within 0.8 points. Per-section shares are not worth their extra rare-language noise, so the
+classifier uses one label. In a separate two-repeat run, lyric meaning (multilingual MiniLM, one vector per song) gave +2.0 by
+itself and only +0.2 on top of language, so it was left out of sorting. Language or meaning without sound reach only 47–49%.
+
+Language detection reads the lyrics it is given: a Japanese song stored with an English translation is labelled English, and
+romanized Japanese can come back as an unrelated language. Languages with fewer than 15 labelled songs are ignored for that reason.
+
+In the sorter, on songs by artists never sorted, adding language moved real playlists in the top 1 from 35% to 36%, top 3 from
+61% to 63%, and top 5 from 73% to 75%. Known artists did not change. Auto-picks on labelled songs went from 9.8 to 10.3 per 100
+at 81.2% right both times. New-artist pre-checks went from 70% right (n = 27) to 63% (n = 32), a change too small to separate from noise.

@@ -10,15 +10,39 @@ held-out AUC reaches `min_trust`, so a playlist sound can't separate is never pi
 defaults favour reliable picks over many picks; see bench/REPORT.md for how they were tuned.
 """
 
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 
+LANGUAGE_WEIGHT = 0.3  # how much a known lyric language counts next to a unit-length sound vector
+MIN_LANGUAGE_SONGS = 15  # labelled songs a language needs before it becomes a feature
 RIDGE_LAMBDA = 3.0
 CONFIDENCE = 0.9
 MIN_TRUST = 0.9  # lowest held-out playlist AUC that may have a cutoff
 MIN_POSITIVES = 5  # too few members to fit a confidence curve below this
+
+
+def with_language(
+    x: np.ndarray,
+    languages: Sequence[str | None],
+    labelled: np.ndarray,
+    *,
+    weight: float = LANGUAGE_WEIGHT,
+    min_songs: int = MIN_LANGUAGE_SONGS,
+) -> tuple[np.ndarray, list[str]]:
+    """Adds one column per language common among the labelled songs, re-normalised to unit length.
+    A song with no known language gets zeros, so it is scored from sound alone. Returns the columns' names."""
+    counts = Counter(languages[int(i)] for i in np.flatnonzero(labelled) if languages[int(i)] is not None)
+    names = sorted(str(k) for k, n in counts.items() if n >= min_songs)
+    column = {k: j for j, k in enumerate(names)}
+    extra = np.zeros((len(x), len(names)), x.dtype)
+    for i, language in enumerate(languages):
+        if language in column:
+            extra[i, column[language]] = weight
+    joined = np.hstack([x, extra])
+    return joined / np.linalg.norm(joined, axis=1, keepdims=True), names
 
 
 def auc(scores: np.ndarray, pos: np.ndarray) -> float:

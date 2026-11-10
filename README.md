@@ -101,10 +101,16 @@ Writes one line per input line, in input order, duplicates included:
 ### `classify <labels.jsonl> --vectors <vectors.jsonl> --out <classifier.json>`
 
 Trains one linear classifier per label from `export`'s vectors, using only NumPy (seconds on a laptop). Each input line is
-`{"key": "...", "artists": ["id", ...], "labels": ["playlist", ...]}`; `labels` may be empty, and such songs are only scored.
-Output: `keys`, `playlists` (`id`, `auc`, `cutoff`), `scores` (keys × playlists) and `picks` (per key, the one playlist index
-that sound alone should choose, or null). A labelled song's score comes from models that never saw it or its artists.
+`{"key": "...", "artists": ["id", ...], "labels": ["playlist", ...], "language": "en"}`; `labels` may be empty, and such songs are only scored.
+`language` is optional: a song without one, or in a language with fewer than 15 labelled songs, is scored from sound alone.
+Output: `confidence`, `languages` (those used), `keys`, `playlists` (`id`, `auc`, `cutoff`), `scores` (keys × playlists) and `picks` (per key, the one playlist index
+that the classifier alone should choose, or null). A labelled song's score comes from models that never saw it or its artists.
 Options: `--confidence 0.9`, `--min-trust 0.9`, `--min-size 12`. See `bench/REPORT.md` for how the defaults were tuned.
+
+### `languages <lyrics.jsonl> --out <languages.jsonl>`
+
+Guesses each song's language from lyrics lines shaped `{"key": "...", "status": "ok", "plain": "..."}`, as written by `bench/fetch_lyrics.py`.
+Writes `{"key": "...", "language": "en"}` for songs with a confident guess. Takes seconds, so rerun it whenever lyrics are added.
 
 ## Library API
 
