@@ -1,6 +1,6 @@
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# audio-embed-engine
+# Stemma
 
 Turns tracks into "how it sounds" vectors. A track's ISRC is looked up on Deezer, its 30 s
 preview is downloaded and decoded in memory, and a local music model
@@ -15,7 +15,7 @@ Nothing here is Spotify-specific. Callers pass track metadata in and read vector
 Requires [uv](https://docs.astral.sh/uv/). Python 3.14 is fetched by uv if missing.
 
 ```sh
-cd /Users/axel/.t3/projects/audio-embed-engine
+cd /Users/axel/Desktop/Code_Projects/Personal/Developer/Stemma
 uv sync
 ```
 
@@ -28,8 +28,8 @@ bundled in the `soundfile` wheel, and the mel front end is numpy.
 Run from any cwd. Relative paths resolve against *your* cwd, not this repo:
 
 ```sh
-uv run --project /Users/axel/.t3/projects/audio-embed-engine audio-embed embed data/tracks.jsonl
-uv run --project /Users/axel/.t3/projects/audio-embed-engine audio-embed export data/tracks.jsonl --out data/embeddings.jsonl
+uv run --project /Users/axel/Desktop/Code_Projects/Personal/Developer/Stemma audio-embed embed data/tracks.jsonl
+uv run --project /Users/axel/Desktop/Code_Projects/Personal/Developer/Stemma audio-embed export data/tracks.jsonl --out data/embeddings.jsonl
 ```
 
 | Env var | Default | Meaning |
