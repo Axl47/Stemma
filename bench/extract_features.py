@@ -481,7 +481,7 @@ def report(sources: Path, out: Path) -> None:
         t = d["tempo"]
         agree = tempo_agreement(t["bpm_first"], t["bpm_last"])
         print(
-            f"{name:34} {d['dur']:5.0f} {t['bpm']:6} {t['bpm_first']:6} {t['bpm_last']:6} {t['bpm_fold']:6} {'y' if t['bpm_ambig'] else '':>3} {t['bpb']:3} {t['reg']:5} {agree:>10}"
+            f"{name:34} {d['dur']:5.0f} {t['bpm'] or '-':>6} {t['bpm_first'] or '-':>6} {t['bpm_last'] or '-':>6} {t['bpm_fold'] or '-':>6} {'y' if t['bpm_ambig'] else '':>3} {t['bpb'] or '-':>3} {t['reg'] if t['reg'] is not None else '-':>5} {agree:>10}"
         )
 
     has_rest = any("rest" in d["tonal"] for _, d in rows)
