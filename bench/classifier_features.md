@@ -105,6 +105,8 @@ Combinations (screening seeds): lyrics@2 + vocals@0.5 +1.9 pp (+0.9 to +2.9), ly
 
 ## What shipping the winner takes
 
+**Shipped: lyrics only** (weight 2, `classify --lyrics <per-song vectors.jsonl>`, via `classifier.with_block`; this script now builds its design matrix through the same function, and its lyrics@2 rows reproduce with it). The vocals block and the `--lyrics PATH` index format sketched below were not shipped.
+
 Weights: lyrics 2.0, vocals 0.5; missing blocks mean-filled from the labelled songs (the training mean).
 
 Stemma (`audio-embed classify`, shipped in `src/audio_embed_engine/`):

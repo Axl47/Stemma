@@ -1,6 +1,12 @@
-import numpy as np
+import json
+import sys
+from pathlib import Path
 
-from audio_embed_engine.classifier import auc, score_ridge, train, with_language
+import numpy as np
+import pytest
+
+from audio_embed_engine import cli
+from audio_embed_engine.classifier import auc, score_ridge, train, with_block, with_language
 from audio_embed_engine.language import detect_language
 
 
@@ -76,3 +82,45 @@ def test_a_labelled_song_is_scored_without_seeing_its_own_label() -> None:
     scores, _, _ = train(x, y, artists, [f"a{i}" for i in range(n)])
 
     assert abs(auc(scores[:, 0], y[:, 0]) - 0.5) < 0.15
+
+
+def test_a_song_without_lyrics_gets_the_fit_songs_mean_and_is_scored_from_sound() -> None:
+    rng = np.random.default_rng(2)
+    x = unit(rng.normal(size=(6, 8)))
+    block = unit(rng.normal(size=(6, 4)))
+    present = np.array([True, True, True, False, True, False])
+    fit = np.array([True, True, False, True, True, False])  # row 2 has lyrics but isn't a fit song
+
+    joined = with_block(x, block, present, fit, weight=2.0)
+
+    mean = (block[0] + block[1] + block[4]) / 3
+    assert joined.shape == (6, 12) and np.allclose(joined[:, :8], x)
+    assert np.allclose(joined[[0, 1, 2, 4], 8:], 2.0 * block[[0, 1, 2, 4]])
+    assert np.allclose(joined[[3, 5], 8:], 2.0 * mean)
+
+
+def test_classify_without_lyrics_is_the_sound_and_language_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rng = np.random.default_rng(3)
+    n = 120
+    x = unit(rng.normal(size=(n, 16)))
+    x[: n // 2, 0] += 0.5
+    songs = [
+        {"key": f"s{i}", "artists": [f"a{i}"], "labels": ["p"] if i < n // 2 else ["q"], "language": "en"}
+        for i in range(n)
+    ]
+    labels, vectors, out = tmp_path / "labels.jsonl", tmp_path / "vectors.jsonl", tmp_path / "out.json"
+    labels.write_text("\n".join(json.dumps(s) for s in songs))
+    vectors.write_text("\n".join(json.dumps({"key": f"s{i}", "vector": x[i].tolist()}) for i in range(n)))
+    monkeypatch.setattr(
+        sys, "argv", ["audio-embed", "classify", str(labels), "--vectors", str(vectors), "--out", str(out)]
+    )
+
+    cli.main()
+
+    y = np.array([[i < n // 2, i >= n // 2] for i in range(n)])
+    joined, _ = with_language(x, ["en"] * n, y.any(1), min_songs=15)
+    scores, picks, _ = train(joined, y, [frozenset({f"a{i}"}) for i in range(n)], [f"a{i}" for i in range(n)])
+    saved = json.loads(out.read_text())
+    assert saved["scores"] == np.round(scores, 3).tolist() and saved["picks"] == picks

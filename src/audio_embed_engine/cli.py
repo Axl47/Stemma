@@ -16,7 +16,7 @@ from typing import TextIO
 import numpy as np
 
 from .cache import Cache
-from .classifier import CONFIDENCE, MIN_TRUST, train, with_language
+from .classifier import CONFIDENCE, LYRICS_WEIGHT, MIN_TRUST, train, with_block, with_language
 from .engine import EmbedStats, Result, embed_tracks, lookup
 from .language import detect_language
 from .models import DiscogsEffnet
@@ -108,6 +108,27 @@ def cmd_export(args: argparse.Namespace) -> None:
         _write_jsonl(results, out, args.tags)
 
 
+def _read_block(path: str, keys: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Per-song vectors from JSONL `{"key", "vector"}`, as rows aligned to `keys`, scaled to unit length.
+    Songs missing from the file get a zero row and a False flag."""
+    wanted = set(keys)
+    found: dict[str, np.ndarray] = {}
+    with open(path) as f:
+        for line in f:
+            row = json.loads(line)
+            v = np.asarray(row["vector"], np.float32)
+            if row["key"] in wanted and (norm := np.linalg.norm(v)) > 0:
+                found[row["key"]] = v / norm
+    if not found:
+        sys.exit(f"{path}: no vectors for any song in the labels file")
+    block = np.zeros((len(keys), len(next(iter(found.values())))), np.float32)
+    present = np.zeros(len(keys), bool)
+    for i, k in enumerate(keys):
+        if k in found:
+            block[i], present[i] = found[k], True
+    return block, present
+
+
 def cmd_classify(args: argparse.Namespace) -> None:
     vectors: dict[str, list[float]] = {}
     with open(args.vectors) as f:
@@ -136,6 +157,9 @@ def cmd_classify(args: argparse.Namespace) -> None:
     artists = [frozenset(songs[k]["artists"]) or frozenset({k}) for k in keys]
     primary = [(songs[k]["artists"] or [k])[0] for k in keys]
     x, languages = with_language(x, [songs[k].get("language") for k in keys], y.any(1))
+    if args.lyrics:
+        block, present = _read_block(args.lyrics, keys)
+        x = with_block(x, block, present, y.any(1), weight=args.lyrics_weight)
     scores, picks, fits = train(x, y, artists, primary, confidence=args.confidence, min_trust=args.min_trust)
 
     output = {
@@ -203,6 +227,15 @@ def main() -> None:
     c.add_argument("--out", required=True)
     c.add_argument("--confidence", type=float, default=CONFIDENCE, help="chance of belonging needed to auto-pick")
     c.add_argument("--min-trust", type=float, default=MIN_TRUST, help="lowest held-out playlist AUC that may auto-pick")
+    c.add_argument(
+        "--lyrics", help='JSONL: {"key", "vector"} per line, one vector per song (e.g. mean lyric passage embedding)'
+    )
+    c.add_argument(
+        "--lyrics-weight",
+        type=float,
+        default=LYRICS_WEIGHT,
+        help="how much the lyric vectors count next to sound (1 = equal)",
+    )
     c.add_argument("--min-size", type=int, default=12, help="ignore playlists with fewer embedded songs")
     c.set_defaults(func=cmd_classify)
 

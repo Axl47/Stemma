@@ -41,6 +41,7 @@ from audio_embed_engine.classifier import (
     out_of_fold,
     platt,
     score_ridge,
+    with_block,
     with_language,
 )
 
@@ -181,12 +182,10 @@ class Data:
         in_train = np.zeros(len(self.keys), bool)
         in_train[train] = True
         x, _ = with_language(self.mix, self.languages, in_train)
-        parts = [x]
         for name, weight in spec:
             arr, mask = self.blocks[name]
-            fill = arr[mask & in_train].mean(0)  # a song without the block looks average to the model
-            parts.append(weight * np.where(mask[:, None], arr, fill))
-        return np.hstack(parts).astype(np.float32)
+            x = with_block(x, arr, mask, in_train, weight=weight)  # the shipped step: absent rows get the training mean
+        return x
 
 
 def run_seed(d: Data, spec: list[tuple[str, float]], seed: int) -> dict[str, np.ndarray]:

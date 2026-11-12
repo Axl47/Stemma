@@ -18,6 +18,7 @@ import numpy as np
 
 LANGUAGE_WEIGHT = 0.3  # how much a known lyric language counts next to a unit-length sound vector
 MIN_LANGUAGE_SONGS = 15  # labelled songs a language needs before it becomes a feature
+LYRICS_WEIGHT = 2.0  # lyric vector vs a unit-length sound vector; chosen in bench/classifier_features.md
 RIDGE_LAMBDA = 3.0
 CONFIDENCE = 0.9
 MIN_TRUST = 0.9  # lowest held-out playlist AUC that may have a cutoff
@@ -43,6 +44,23 @@ def with_language(
             extra[i, column[language]] = weight
     joined = np.hstack([x, extra])
     return joined / np.linalg.norm(joined, axis=1, keepdims=True), names
+
+
+def with_block(
+    x: np.ndarray,
+    block: np.ndarray,
+    present: np.ndarray,
+    fit: np.ndarray,
+    *,
+    weight: float = LYRICS_WEIGHT,
+) -> np.ndarray:
+    """Appends `block` (one unit-length row per song, `weight` times) as extra columns. A song without one
+    (`present` False) gets the mean over the `fit` songs that have it, so it adds nothing once the
+    ridge centres its columns and is scored from the other columns alone."""
+    if not (present & fit).any():
+        return x
+    fill = block[present & fit].mean(0)
+    return np.hstack([x, weight * np.where(present[:, None], block, fill)]).astype(x.dtype)
 
 
 def auc(scores: np.ndarray, pos: np.ndarray) -> float:

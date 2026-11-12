@@ -105,7 +105,9 @@ Trains one linear classifier per label from `export`'s vectors, using only NumPy
 `language` is optional: a song without one, or in a language with fewer than 15 labelled songs, is scored from sound alone.
 Output: `confidence`, `languages` (those used), `keys`, `playlists` (`id`, `auc`, `cutoff`), `scores` (keys × playlists) and `picks` (per key, the one playlist index
 that the classifier alone should choose, or null). A labelled song's score comes from models that never saw it or its artists.
-Options: `--confidence 0.9`, `--min-trust 0.9`, `--min-size 12`. See `bench/REPORT.md` for how the defaults were tuned.
+`--lyrics <vectors.jsonl>` adds each song's lyrics as extra features: one `{"key": "...", "vector": [...]}` line per song, the mean of its lyric passage embeddings (any size; rows are scaled to unit length).
+Songs without a line are scored from sound alone. On held-out artists it raised recall@3 by about 1.2 points and auto-check precision from 77% to 81% (`bench/classifier_features.md`).
+Options: `--confidence 0.9`, `--min-trust 0.9`, `--min-size 12`, `--lyrics-weight 2` (how much the lyric vector counts next to the unit-length sound vector). See `bench/REPORT.md` for how the defaults were tuned.
 
 ### `languages <lyrics.jsonl> --out <languages.jsonl>`
 
