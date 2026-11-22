@@ -169,3 +169,8 @@ uv run ruff check && uv run pyright
 ```
 
 `bench/` holds the model benchmark. See [bench/REPORT.md](bench/REPORT.md).
+
+## License
+
+The code is [MIT](LICENSE). The Discogs-EffNet model weights are not included: they are downloaded on first use from
+[Essentia](https://essentia.upf.edu/models.html), under that project's own license (CC BY-NC-SA 4.0).
