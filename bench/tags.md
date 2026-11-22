@@ -5,10 +5,10 @@
 ## Run
 
 ```sh
-cd /Users/axel/Desktop/Code_Projects/Personal/Developer/Stemma
+cd Stemma
 uv run --no-project --python 3.12 bench/tags.py run        # writes ~/.cache/audio-embed-engine/tags/tags.jsonl from scratch
 uv run --no-project --python 3.12 bench/tags.py verify     # recompute 8 songs from audio, compare (~30 s, needs audio-box)
-uv run --no-project --python 3.12 bench/tags.py report /Users/axel/Desktop/Code_Projects/Personal/Web/Cento/data
+uv run --no-project --python 3.12 bench/tags.py report path/to/Cento/data
 ```
 
 The script carries its own dependencies (PEP 723: essentia, onnx, onnxruntime, numpy, soxr), so it needs neither the project's virtualenv nor `uv sync`. `run` always rewrites the file (via `tags.jsonl.part`); rerun it after new patches are embedded.

@@ -1,5 +1,7 @@
 """Download full-track audio from YouTube Music for a track list, slowly, into a directory.
 
+Research tool for a personal library, not part of the engine. YouTube's terms don't allow downloading.
+
 Usage: python bench/fetch_youtube.py <tracks.jsonl> <out_dir> [--sleep MIN MAX] [--limit N]
                                     [--upload RSYNC_DEST [--upload-every N]]
 

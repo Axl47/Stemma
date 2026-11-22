@@ -11,7 +11,7 @@ Checked to install and run together in the script's own environment (Python 3.12
 The script carries its own dependencies (PEP 723, Python 3.12, resolved as of 2026-11-12), so it needs neither the project's virtualenv nor `uv sync`:
 
 ```sh
-cd /Users/axel/Desktop/Code_Projects/Personal/Developer/Stemma
+cd Stemma
 F=~/.cache/audio-embed-engine/features
 rsync -t audio-box:data/sources.jsonl $F/                 # the box's list of songs and files
 

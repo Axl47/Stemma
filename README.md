@@ -8,14 +8,28 @@ preview is downloaded and decoded in memory, and a local music model
 a 1280-d L2-normalised vector plus a few style and mood tags. Results are cached in SQLite,
 so each track is processed once per model.
 
-Nothing here is Spotify-specific. Callers pass track metadata in and read vectors out.
+Nothing here is Spotify-specific. Callers pass track metadata in and read vectors out. It is the
+audio engine behind [Cento](https://github.com/Axl47/Cento), which uses these vectors to sort a
+music library into playlists and lay it out on a map by sound.
+
+## Results
+
+On a real library of ~5,900 tracks (full numbers and method in [bench/REPORT.md](bench/REPORT.md)):
+
+| | |
+| --- | --- |
+| Throughput | ~510 tracks/min end to end, bound by Deezer's API quota; inference alone ~40 ms/track on an M1 Pro |
+| Re-run, all cached | 0.22 s for 6,233 tracks |
+| Deezer hit rate | 96.9% |
+| Same playlist vs not | pair AUC 0.77 (random 0.50), with same-artist pairs excluded |
+| Artist never sorted before | recall@3 0.49 from sound alone (popularity baseline 0.21) |
 
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/). Python 3.14 is fetched by uv if missing.
 
 ```sh
-cd /Users/axel/Desktop/Code_Projects/Personal/Developer/Stemma
+git clone https://github.com/Axl47/Stemma && cd Stemma
 uv sync
 ```
 
@@ -28,8 +42,8 @@ bundled in the `soundfile` wheel, and the mel front end is numpy.
 Run from any cwd. Relative paths resolve against *your* cwd, not this repo:
 
 ```sh
-uv run --project /Users/axel/Desktop/Code_Projects/Personal/Developer/Stemma audio-embed embed data/tracks.jsonl
-uv run --project /Users/axel/Desktop/Code_Projects/Personal/Developer/Stemma audio-embed export data/tracks.jsonl --out data/embeddings.jsonl
+uv run --project /path/to/Stemma audio-embed embed data/tracks.jsonl
+uv run --project /path/to/Stemma audio-embed export data/tracks.jsonl --out data/embeddings.jsonl
 ```
 
 | Env var | Default | Meaning |
@@ -168,7 +182,13 @@ uv run pytest            # focused tests, no network
 uv run ruff check && uv run pyright
 ```
 
-`bench/` holds the model benchmark. See [bench/REPORT.md](bench/REPORT.md).
+`bench/` holds the model benchmark ([bench/REPORT.md](bench/REPORT.md)) and the research scripts that go past
+30 s previews: full-track embeddings, stem separation with Demucs (needs CUDA), tempo, key and loudness
+features, tags and lyrics. They need the optional group (`uv run --group bench`) and `PYTHONPATH=bench`. Their
+`audio-box:` defaults are an ssh alias for a storage server, so pass your own destination.
+
+`bench/fetch_youtube.py` downloads full tracks from YouTube Music for research on a personal library. It isn't
+part of the engine, and YouTube's terms don't allow downloading, so use it at your own discretion.
 
 ## License
 
