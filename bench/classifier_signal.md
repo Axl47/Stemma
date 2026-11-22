@@ -3,7 +3,7 @@
 Script: `bench/classifier_signal.py`. Rerun from the Stemma repo (about 1 minute, CPU; results cached in `~/.cache/audio-embed-engine/classifier-signal/`):
 
 ```sh
-PYTHONPATH=bench uv run --group bench python bench/classifier_signal.py /Users/axel/Desktop/Code_Projects/Personal/Web/Cento --verify --out /tmp/signal-tables.md
+PYTHONPATH=bench uv run --group bench python bench/classifier_signal.py path/to/Cento --verify --out /tmp/signal-tables.md
 ```
 
 ## Verdict

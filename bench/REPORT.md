@@ -196,7 +196,7 @@ sleeps between tracks.
 - **Bot checks:** none in ~52 minutes.
 - **Cost:** ~9 s per track (mostly yt-dlp's JS challenge), plus the sleep, so ~15 s per track.
   Files average 3.6 MB.
-- **Server:** from the production server's datacenter IP, YouTube answered
+- **Server:** from a datacenter IP, YouTube answered
   "Sign in to confirm you're not a bot" for every track tried. This held with and without a JS
   runtime.
 
