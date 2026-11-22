@@ -3,6 +3,7 @@ name = "audio-embed-engine"
 version = "0.1.0"
 description = "Tracks -> Deezer previews -> cached audio embeddings (Discogs-EffNet)"
 readme = "README.md"
+license = "MIT"
 authors = [
     { name = "Axl47", email = "axelorta2153@gmail.com" }
 ]
